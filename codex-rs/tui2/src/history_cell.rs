@@ -217,8 +217,6 @@ impl dyn HistoryCell {
 pub(crate) struct UserHistoryCell {
     pub message: String,
     pub text_elements: Vec<TextElement>,
-    #[allow(dead_code)]
-    pub local_image_paths: Vec<PathBuf>,
 }
 
 impl HistoryCell for UserHistoryCell {
@@ -238,7 +236,7 @@ impl HistoryCell for UserHistoryCell {
 
         let (wrapped, joiner_before) = if self.text_elements.is_empty() {
             crate::wrapping::word_wrap_lines_with_joiners(
-                self.message.split('\n').map(|l| Line::from(l).style(style)),
+                self.message.lines().map(|l| Line::from(l).style(style)),
                 // Wrap algorithm matches textarea.rs.
                 RtOptions::new(usize::from(wrap_width))
                     .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
@@ -248,7 +246,7 @@ impl HistoryCell for UserHistoryCell {
             elements.sort_by_key(|e| e.byte_range.start);
             let mut offset = 0usize;
             let mut raw_lines: Vec<Line<'static>> = Vec::new();
-            for line_text in self.message.split('\n') {
+            for line_text in self.message.lines() {
                 let line_start = offset;
                 let line_end = line_start + line_text.len();
                 let mut spans: Vec<Span<'static>> = Vec::new();
@@ -260,42 +258,27 @@ impl HistoryCell for UserHistoryCell {
                     if start >= end {
                         continue;
                     }
-                    let rel_start = start - line_start;
-                    let rel_end = end - line_start;
-                    // Guard against malformed UTF-8 byte ranges from upstream data; skip
-                    // invalid elements rather than panicking while rendering history.
-                    if !line_text.is_char_boundary(rel_start)
-                        || !line_text.is_char_boundary(rel_end)
-                    {
-                        continue;
+                    if cursor < start {
+                        spans.push(Span::from(
+                            line_text[(cursor - line_start)..(start - line_start)].to_string(),
+                        ));
                     }
-                    let rel_cursor = cursor - line_start;
-                    if cursor < start
-                        && line_text.is_char_boundary(rel_cursor)
-                        && let Some(segment) = line_text.get(rel_cursor..rel_start)
-                    {
-                        spans.push(Span::from(segment.to_string()));
-                    }
-                    if let Some(segment) = line_text.get(rel_start..rel_end) {
-                        spans.push(Span::styled(segment.to_string(), element_style));
-                        cursor = end;
-                    }
+                    spans.push(Span::styled(
+                        line_text[(start - line_start)..(end - line_start)].to_string(),
+                        element_style,
+                    ));
+                    cursor = end;
                 }
-                let rel_cursor = cursor - line_start;
-                if cursor < line_end
-                    && line_text.is_char_boundary(rel_cursor)
-                    && let Some(segment) = line_text.get(rel_cursor..)
-                {
-                    spans.push(Span::from(segment.to_string()));
+                if cursor < line_end {
+                    spans.push(Span::from(line_text[(cursor - line_start)..].to_string()));
                 }
                 let line = if spans.is_empty() {
-                    Line::from(line_text.to_string()).style(style)
+                    Line::from(line_text).style(style)
                 } else {
                     Line::from(spans).style(style)
                 };
                 raw_lines.push(line);
-                // Split on '\n' so any '\r' stays in the line; advancing by 1 accounts
-                // for the separator byte.
+                // TextArea normalizes newlines to '\n', so advancing by 1 is correct.
                 offset = line_end + 1;
             }
             crate::wrapping::word_wrap_lines_with_joiners(
@@ -1023,15 +1006,10 @@ pub(crate) fn new_session_info(
     SessionInfoCell(CompositeHistoryCell { parts })
 }
 
-pub(crate) fn new_user_prompt(
-    message: String,
-    text_elements: Vec<TextElement>,
-    local_image_paths: Vec<PathBuf>,
-) -> UserHistoryCell {
+pub(crate) fn new_user_prompt(message: String, text_elements: Vec<TextElement>) -> UserHistoryCell {
     UserHistoryCell {
         message,
         text_elements,
-        local_image_paths,
     }
 }
 
@@ -2794,7 +2772,6 @@ mod tests {
         let cell = UserHistoryCell {
             message: msg.to_string(),
             text_elements: Vec::new(),
-            local_image_paths: Vec::new(),
         };
 
         // Small width to force wrapping more clearly. Effective wrap width is width-2 due to the ▌ prefix and trailing space.

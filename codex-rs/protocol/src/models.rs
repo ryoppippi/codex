@@ -66,9 +66,15 @@ pub enum ResponseInputItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentItem {
-    InputText { text: String },
-    InputImage { image_url: String },
-    OutputText { text: String },
+    InputText {
+        text: String,
+    },
+    InputImage {
+        image_url: String,
+    },
+    OutputText {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
@@ -1125,7 +1131,7 @@ mod tests {
             ResponseInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 1);
                 match &content[0] {
-                    ContentItem::InputText { text } => {
+                    ContentItem::InputText { text, .. } => {
                         let display_path = missing_path.display().to_string();
                         assert!(
                             text.contains(&display_path),
@@ -1159,7 +1165,7 @@ mod tests {
             ResponseInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 1);
                 match &content[0] {
-                    ContentItem::InputText { text } => {
+                    ContentItem::InputText { text, .. } => {
                         assert!(
                             text.contains("unsupported MIME type `application/json`"),
                             "placeholder should mention unsupported MIME: {text}"
@@ -1200,7 +1206,7 @@ mod tests {
                     svg_path.display()
                 );
                 match &content[0] {
-                    ContentItem::InputText { text } => assert_eq!(text, &expected),
+                    ContentItem::InputText { text, .. } => assert_eq!(text, &expected),
                     other => panic!("expected placeholder text but found {other:?}"),
                 }
             }

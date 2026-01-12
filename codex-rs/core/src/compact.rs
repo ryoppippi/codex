@@ -197,7 +197,7 @@ pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
     let mut pieces = Vec::new();
     for item in content {
         match item {
-            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+            ContentItem::InputText { text, .. } | ContentItem::OutputText { text } => {
                 if !text.is_empty() {
                     pieces.push(text.as_str());
                 }
@@ -277,6 +277,8 @@ fn build_compacted_history_with_limit(
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: message.clone(),
+                // Compaction history is synthesized; no UI element ranges to preserve.
+                text_elements: Vec::new(),
             }],
         });
     }
@@ -290,7 +292,11 @@ fn build_compacted_history_with_limit(
     history.push(ResponseItem::Message {
         id: None,
         role: "user".to_string(),
-        content: vec![ContentItem::InputText { text: summary_text }],
+        content: vec![ContentItem::InputText {
+            text: summary_text,
+            // Compaction summary is synthesized; no UI element ranges to preserve.
+            text_elements: Vec::new(),
+        }],
     });
 
     history

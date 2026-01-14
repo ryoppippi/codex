@@ -406,11 +406,6 @@ pub(crate) struct App {
 
     // Esc-backtracking state grouped
     pub(crate) backtrack: crate::app_backtrack::BacktrackState,
-    /// When set, the next draw re-renders the transcript into terminal scrollback once.
-    ///
-    /// This is used after a confirmed conversation rollback to ensure scrollback reflects the
-    /// trimmed transcript cells.
-    pub(crate) backtrack_render_pending: bool,
     pub(crate) feedback: codex_feedback::CodexFeedback,
     /// Set when the user confirms an update; propagated on exit.
     pub(crate) pending_update_action: Option<UpdateAction>,
@@ -423,7 +418,7 @@ pub(crate) struct App {
     skip_world_writable_scan_once: bool,
 }
 impl App {
-    pub fn chatwidget_init_for_forked_or_resumed_thread(
+    pub fn chatwidget_init_from_existing_thread(
         &self,
         tui: &mut tui::Tui,
         cfg: codex_core::config::Config,
@@ -434,21 +429,17 @@ impl App {
             app_event_tx: self.app_event_tx.clone(),
             initial_prompt: None,
             initial_images: Vec::new(),
-            // Fork/resume bootstraps here don't carry any prefilled message content.
-            initial_text_elements: Vec::new(),
             enhanced_keys_supported: self.enhanced_keys_supported,
             auth_manager: self.auth_manager.clone(),
             models_manager: self.server.get_models_manager(),
             feedback: self.feedback.clone(),
             is_first_run: false,
-            model: Some(self.current_model.clone()),
+            model: self.current_model.clone(),
         }
     }
 
     async fn shutdown_current_conversation(&mut self) {
         if let Some(conversation_id) = self.chat_widget.conversation_id() {
-            // Clear any in-flight rollback guard when switching conversations.
-            self.backtrack.pending_rollback = None;
             self.suppress_shutdown_complete = true;
             self.chat_widget.submit_op(Op::Shutdown);
             self.server.remove_thread(&conversation_id).await;
@@ -510,8 +501,6 @@ impl App {
                     app_event_tx: app_event_tx.clone(),
                     initial_prompt: initial_prompt.clone(),
                     initial_images: initial_images.clone(),
-                    // CLI prompt args are plain strings, so they don't provide element ranges.
-                    initial_text_elements: Vec::new(),
                     enhanced_keys_supported,
                     auth_manager: auth_manager.clone(),
                     models_manager: thread_manager.get_models_manager(),
@@ -535,8 +524,6 @@ impl App {
                     app_event_tx: app_event_tx.clone(),
                     initial_prompt: initial_prompt.clone(),
                     initial_images: initial_images.clone(),
-                    // CLI prompt args are plain strings, so they don't provide element ranges.
-                    initial_text_elements: Vec::new(),
                     enhanced_keys_supported,
                     auth_manager: auth_manager.clone(),
                     models_manager: thread_manager.get_models_manager(),
@@ -560,8 +547,6 @@ impl App {
                     app_event_tx: app_event_tx.clone(),
                     initial_prompt: initial_prompt.clone(),
                     initial_images: initial_images.clone(),
-                    // CLI prompt args are plain strings, so they don't provide element ranges.
-                    initial_text_elements: Vec::new(),
                     enhanced_keys_supported,
                     auth_manager: auth_manager.clone(),
                     models_manager: thread_manager.get_models_manager(),
@@ -622,7 +607,6 @@ impl App {
             scroll_config,
             scroll_state: MouseScrollState::default(),
             backtrack: BacktrackState::default(),
-            backtrack_render_pending: false,
             feedback: feedback.clone(),
             pending_update_action: None,
             suppress_shutdown_complete: false,
@@ -747,10 +731,6 @@ impl App {
                     self.chat_widget.handle_paste(pasted);
                 }
                 TuiEvent::Draw => {
-                    if self.backtrack_render_pending {
-                        self.backtrack_render_pending = false;
-                        self.render_transcript_once(tui);
-                    }
                     self.chat_widget.maybe_post_pending_notification(tui);
                     if self
                         .chat_widget
@@ -1481,8 +1461,6 @@ impl App {
                     app_event_tx: self.app_event_tx.clone(),
                     initial_prompt: None,
                     initial_images: Vec::new(),
-                    // New sessions start without prefilled message content.
-                    initial_text_elements: Vec::new(),
                     enhanced_keys_supported: self.enhanced_keys_supported,
                     auth_manager: self.auth_manager.clone(),
                     models_manager: self.server.get_models_manager(),
@@ -1529,10 +1507,8 @@ impl App {
                         {
                             Ok(resumed) => {
                                 self.shutdown_current_conversation().await;
-                                let init = self.chatwidget_init_for_forked_or_resumed_thread(
-                                    tui,
-                                    self.config.clone(),
-                                );
+                                let init = self
+                                    .chatwidget_init_from_existing_thread(tui, self.config.clone());
                                 self.chat_widget = ChatWidget::new_from_existing(
                                     init,
                                     resumed.thread,
@@ -1567,53 +1543,61 @@ impl App {
                 // Leaving alt-screen may blank the inline viewport; force a redraw either way.
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::ForkCurrentSession => {
-                let summary = session_summary(
-                    self.chat_widget.token_usage(),
-                    self.chat_widget.conversation_id(),
-                );
-                if let Some(path) = self.chat_widget.rollout_path() {
-                    match self
-                        .server
-                        .fork_thread(usize::MAX, self.config.clone(), path.clone())
-                        .await
-                    {
-                        Ok(forked) => {
-                            self.shutdown_current_conversation().await;
-                            let init = self.chatwidget_init_for_forked_or_resumed_thread(
-                                tui,
-                                self.config.clone(),
-                            );
-                            self.chat_widget = ChatWidget::new_from_existing(
-                                init,
-                                forked.thread,
-                                forked.session_configured,
-                            );
-                            if let Some(summary) = summary {
-                                let mut lines: Vec<Line<'static>> =
-                                    vec![summary.usage_line.clone().into()];
-                                if let Some(command) = summary.resume_command {
-                                    let spans = vec![
-                                        "To continue this session, run ".into(),
-                                        command.cyan(),
-                                    ];
-                                    lines.push(spans.into());
+            AppEvent::OpenForkPicker => {
+                match crate::resume_picker::run_fork_picker(
+                    tui,
+                    &self.config.codex_home,
+                    &self.config.model_provider_id,
+                    false,
+                )
+                .await?
+                {
+                    SessionSelection::Fork(path) => {
+                        let summary = session_summary(
+                            self.chat_widget.token_usage(),
+                            self.chat_widget.conversation_id(),
+                        );
+                        match self
+                            .server
+                            .fork_thread(usize::MAX, self.config.clone(), path.clone())
+                            .await
+                        {
+                            Ok(forked) => {
+                                self.shutdown_current_conversation().await;
+                                let init = self
+                                    .chatwidget_init_from_existing_thread(tui, self.config.clone());
+                                self.chat_widget = ChatWidget::new_from_existing(
+                                    init,
+                                    forked.thread,
+                                    forked.session_configured,
+                                );
+                                if let Some(summary) = summary {
+                                    let mut lines: Vec<Line<'static>> =
+                                        vec![summary.usage_line.clone().into()];
+                                    if let Some(command) = summary.resume_command {
+                                        let spans = vec![
+                                            "To continue this session, run ".into(),
+                                            command.cyan(),
+                                        ];
+                                        lines.push(spans.into());
+                                    }
+                                    self.chat_widget.add_plain_history_lines(lines);
                                 }
-                                self.chat_widget.add_plain_history_lines(lines);
+                            }
+                            Err(err) => {
+                                let path_display = path.display();
+                                self.chat_widget.add_error_message(format!(
+                                    "Failed to fork session from {path_display}: {err}"
+                                ));
                             }
                         }
-                        Err(err) => {
-                            let path_display = path.display();
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to fork current session from {path_display}: {err}"
-                            ));
-                        }
                     }
-                } else {
-                    self.chat_widget
-                        .add_error_message("Current session is not ready to fork yet.".to_string());
+                    SessionSelection::Exit
+                    | SessionSelection::StartFresh
+                    | SessionSelection::Resume(_) => {}
                 }
 
+                // Leaving alt-screen may blank the inline viewport; force a redraw either way.
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::InsertHistoryCell(cell) => {
@@ -1661,11 +1645,7 @@ impl App {
                     let errors = errors_for_cwd(&cwd, response);
                     emit_skill_load_warnings(&self.app_event_tx, &errors);
                 }
-                self.handle_backtrack_event(&event.msg);
                 self.chat_widget.handle_codex_event(event);
-                if self.backtrack_render_pending {
-                    tui.frame_requester().schedule_frame();
-                }
             }
             AppEvent::Exit(mode) => match mode {
                 ExitMode::ShutdownFirst => self.chat_widget.submit_op(Op::Shutdown),
@@ -1851,7 +1831,6 @@ impl App {
                                         model: None,
                                         effort: None,
                                         summary: None,
-                                        collaboration_mode: None,
                                     },
                                 ));
                                 self.app_event_tx
@@ -2392,7 +2371,6 @@ mod tests {
             scroll_config: ScrollConfig::default(),
             scroll_state: MouseScrollState::default(),
             backtrack: BacktrackState::default(),
-            backtrack_render_pending: false,
             feedback: codex_feedback::CodexFeedback::new(),
             pending_update_action: None,
             suppress_shutdown_complete: false,
@@ -2446,7 +2424,6 @@ mod tests {
                 scroll_config: ScrollConfig::default(),
                 scroll_state: MouseScrollState::default(),
                 backtrack: BacktrackState::default(),
-                backtrack_render_pending: false,
                 feedback: codex_feedback::CodexFeedback::new(),
                 pending_update_action: None,
                 suppress_shutdown_complete: false,
@@ -2661,7 +2638,6 @@ mod tests {
         let make_header = |is_first| {
             let event = SessionConfiguredEvent {
                 session_id: ThreadId::new(),
-                forked_from_id: None,
                 model: "gpt-test".to_string(),
                 model_provider_id: "test-provider".to_string(),
                 approval_policy: AskForApproval::Never,
@@ -2703,7 +2679,6 @@ mod tests {
             id: String::new(),
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                 session_id: base_id,
-                forked_from_id: None,
                 model: "gpt-test".to_string(),
                 model_provider_id: "test-provider".to_string(),
                 approval_policy: AskForApproval::Never,
@@ -2975,7 +2950,6 @@ mod tests {
         let conversation_id = ThreadId::new();
         let event = SessionConfiguredEvent {
             session_id: conversation_id,
-            forked_from_id: None,
             model: "gpt-test".to_string(),
             model_provider_id: "test-provider".to_string(),
             approval_policy: AskForApproval::Never,

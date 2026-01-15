@@ -133,6 +133,7 @@ pub async fn process_exec_tool_call(
     sandbox_policy: &SandboxPolicy,
     sandbox_cwd: &Path,
     codex_linux_sandbox_exe: &Option<PathBuf>,
+    linux_sandbox_bind_mounts: bool,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<ExecToolCallOutput> {
     let sandbox_type = match &sandbox_policy {
@@ -178,6 +179,7 @@ pub async fn process_exec_tool_call(
             sandbox_type,
             sandbox_cwd,
             codex_linux_sandbox_exe.as_ref(),
+            linux_sandbox_bind_mounts,
         )
         .map_err(CodexErr::from)?;
 
@@ -905,6 +907,7 @@ mod tests {
             &SandboxPolicy::DangerFullAccess,
             cwd.as_path(),
             &None,
+            false,
             None,
         )
         .await;

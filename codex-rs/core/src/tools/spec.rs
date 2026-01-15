@@ -28,6 +28,7 @@ pub(crate) struct ToolsConfig {
     pub web_search_mode: WebSearchMode,
     pub collab_tools: bool,
     pub experimental_supported_tools: Vec<String>,
+    pub linux_sandbox_bind_mounts: bool,
 }
 
 pub(crate) struct ToolsConfigParams<'a> {
@@ -45,6 +46,7 @@ impl ToolsConfig {
         } = params;
         let include_apply_patch_tool = features.enabled(Feature::ApplyPatchFreeform);
         let include_collab_tools = features.enabled(Feature::Collab);
+        let linux_sandbox_bind_mounts = features.enabled(Feature::LinuxSandboxBindMounts);
 
         let shell_type = if !features.enabled(Feature::ShellTool) {
             ConfigShellToolType::Disabled
@@ -77,6 +79,7 @@ impl ToolsConfig {
             web_search_mode: *web_search_mode,
             collab_tools: include_collab_tools,
             experimental_supported_tools: model_info.experimental_supported_tools.clone(),
+            linux_sandbox_bind_mounts,
         }
     }
 }

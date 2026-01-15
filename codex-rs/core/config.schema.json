@@ -75,6 +75,9 @@
         "apply_patch_freeform": {
           "type": "boolean"
         },
+        "child_agents_md": {
+          "type": "boolean"
+        },
         "collab": {
           "type": "boolean"
         },
@@ -99,10 +102,10 @@
         "experimental_windows_sandbox": {
           "type": "boolean"
         },
-        "child_agents_md": {
+        "include_apply_patch_tool": {
           "type": "boolean"
         },
-        "include_apply_patch_tool": {
+        "linux_sandbox_bind_mounts": {
           "type": "boolean"
         },
         "powershell_utf8": {
@@ -543,6 +546,9 @@
             "apply_patch_freeform": {
               "type": "boolean"
             },
+            "child_agents_md": {
+              "type": "boolean"
+            },
             "collab": {
               "type": "boolean"
             },
@@ -567,10 +573,10 @@
             "experimental_windows_sandbox": {
               "type": "boolean"
             },
-            "child_agents_md": {
+            "include_apply_patch_tool": {
               "type": "boolean"
             },
-            "include_apply_patch_tool": {
+            "linux_sandbox_bind_mounts": {
               "type": "boolean"
             },
             "powershell_utf8": {

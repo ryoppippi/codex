@@ -3,6 +3,19 @@
 //! This file owns backtrack mode (Esc/Enter navigation in the transcript overlay) and also
 //! mediates a key rendering boundary for the transcript overlay.
 //!
+//! Overall goal: keep the main chat view and transcript overlay in sync while allowing users to
+//! "rewind" to an earlier user message. We stage a fork request, wait for core to return a
+//! rollout path, then fork+swap threads and trim local transcript state. This avoids the UI
+//! diverging from the agent if the fork fails or a stale response arrives.
+//!
+//! Backtrack operates as a small state machine:
+//! - The first `Esc` in the main view "primes" the feature and captures a base thread id.
+//! - A subsequent `Esc` opens the transcript overlay (`Ctrl+T`) and highlights a user message.
+//! - `Enter` records a pending backtrack (base id + nth user message + prefill) and requests the
+//!   rollout path for the current thread.
+//! - Only after receiving a matching `ConversationPathResponseEvent` do we fork and swap the
+//!   thread, trim the transcript, and re-render scrollback.
+//!
 //! The transcript overlay (`Ctrl+T`) renders committed transcript cells plus a render-only live
 //! tail derived from the current in-flight `ChatWidget.active_cell`.
 //!
@@ -35,12 +48,20 @@ pub(crate) struct BacktrackState {
     /// True when Esc has primed backtrack mode in the main view.
     pub(crate) primed: bool,
     /// Session id of the base thread to fork from.
+    ///
+    /// If the current thread changes, backtrack selections become invalid and must be ignored.
     pub(crate) base_id: Option<ThreadId>,
-    /// Index in the transcript of the last user message.
+    /// Index of the currently highlighted user message.
+    ///
+    /// This is an index into the filtered "user messages since the last session start" view,
+    /// not an index into `transcript_cells`. `usize::MAX` indicates "no selection".
     pub(crate) nth_user_message: usize,
     /// True when the transcript overlay is showing a backtrack preview.
     pub(crate) overlay_preview_active: bool,
     /// Pending fork request: (base_id, nth_user_message, prefill).
+    ///
+    /// This acts as a guardrail: once we request a backtrack, we block additional submissions
+    /// until core responds with a matching `ConversationPathResponseEvent`.
     pub(crate) pending: Option<(ThreadId, usize, BacktrackPrefill)>,
 }
 

@@ -125,12 +125,15 @@ impl SlashPopupContext {
     /// Return the prefix used to filter slash commands.
     fn popup_prefix(&self) -> &str {
         let mut prefix_end = if self.cursor_on_first_line() {
-            let cursor = if self.cursor == 0 && self.text.starts_with('/') {
-                1
+            if self.cursor == 0 {
+                if self.text.starts_with('/') {
+                    self.first_line_end
+                } else {
+                    0
+                }
             } else {
-                self.cursor
-            };
-            cursor.min(self.first_line_end)
+                self.cursor.min(self.first_line_end)
+            }
         } else {
             self.first_line_end
         };

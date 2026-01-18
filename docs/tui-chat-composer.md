@@ -154,7 +154,8 @@ There are two distinct “Enter becomes newline” mechanisms:
   `extend_window(now)` so a slightly-late Enter keeps behaving like “newline” rather than “submit”.
 
 Both are disabled inside slash-command context (command popup is active or the first line begins
-with `/`) so Enter keeps its normal “submit/execute” semantics while composing commands.
+with `/` but not the literal plain-text prefix `/ `) so Enter keeps its normal “submit/execute”
+semantics while composing commands.
 
 ### Non-char keys / Ctrl+modified input
 

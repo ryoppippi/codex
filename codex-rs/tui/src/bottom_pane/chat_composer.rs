@@ -277,7 +277,7 @@ impl ChatComposer {
             return None;
         }
         // A literal "/ " should be treated as plain text, not a command prefix.
-        if ctx.cursor <= 1 && ctx.first_line().starts_with("/ ") {
+        if ctx.first_line().starts_with("/ ") {
             return None;
         }
         if ctx.popup_prefix() == "/"
